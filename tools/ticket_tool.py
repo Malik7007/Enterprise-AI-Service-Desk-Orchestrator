@@ -1,19 +1,23 @@
 import random
 import time
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 @tool
-def create_ticket(issue_description: str) -> str:
+def create_ticket(issue_desc: str):
     """
-    Creates an IT support ticket in the internal Jira/ServiceNow system.
-    @param issue_description - Detailed description of the problem
-    @returns A formal Ticket ID with status confirmation
+    Simulates a connection to Jira/ServiceNow to create a support ticket.
+    Enterprise Ready: Includes mock latency and structured metadata.
     """
-    # Simulate API Latency for realism
-    time.sleep(1.2)
+    # 🧪 Enterprise Simulation: Real APIs have latency
+    time.sleep(1.2) 
     
-    # Mock ticket creation logic with standard corporate format
-    ticket_id = f"SRV-{random.randint(100000, 999999)}"
-    print(f"[API CALL] POST /v1/tickets -> {ticket_id}")
+    prefixes = ["JIRA", "SNOW", "SVC"]
+    ticket_id = f"{random.choice(prefixes)}-{random.randint(1000, 9999)}"
     
-    return ticket_id
+    return {
+        "id": ticket_id,
+        "status": "QUEUED",
+        "priority": "MEDIUM",
+        "cluster_node": "AWS-US-EAST-1",
+        "description": issue_desc[:50] + "..."
+    }

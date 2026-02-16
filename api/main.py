@@ -11,6 +11,7 @@ import asyncio
 import os
 import shutil
 import requests
+import sqlite3
 
 app = FastAPI(title="Enterprise AI Service Desk API")
 
@@ -97,10 +98,16 @@ async def upload_file(file: UploadFile = File(...), domain: str = Form(...)):
 @app.post("/chat")
 async def chat_stream(request: ChatRequest):
     thread_id = request.thread_id or str(uuid.uuid4())
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "version": "v2"}
     
+    # Audit Logging Setup
+    audit_conn = sqlite3.connect("audit_log.db")
+    audit_cursor = audit_conn.cursor()
+    audit_cursor.execute("CREATE TABLE IF NOT EXISTS logs (time TEXT, thread_id TEXT, message TEXT, provider TEXT, response TEXT)")
+    audit_conn.commit()
+
     async def event_generator() -> AsyncGenerator[dict, None]:
-        print(f"[API] Chat request received. Provider: {request.provider}, Model: {request.model}")
+        print(f"[API] Orchestrating: {request.message[:30]}...")
         yield {"event": "status", "data": json.dumps({"node": "init", "thread_id": thread_id, "provider": request.provider, "model": request.model})}
         
         initial_state = {
@@ -113,29 +120,49 @@ async def chat_stream(request: ChatRequest):
             }
         }
         
+        full_response_content = ""
+        
         try:
-            async for event in graph_app.astream(initial_state, config, stream_mode="updates"):
-                node_name = list(event.keys())[0] if event else "unknown"
-                node_data = event[node_name]
+            # Using astream_events v2 for granular token streaming
+            async for event in graph_app.astream_events(initial_state, config, version="v2"):
+                kind = event.get("event")
                 
-                update = {
-                    "node": node_name,
-                    "intent": node_data.get("intent"),
-                    "confidence": node_data.get("confidence"),
-                    "ticket_id": node_data.get("ticket_id"),
-                    "escalation": node_data.get("escalation")
-                }
+                # 1. Node Start/End Updates
+                if kind == "on_chain_start" and event.get("name") == "LangGraph":
+                    continue # Global chain start
                 
-                yield {"event": "node_update", "data": json.dumps(update)}
+                if kind == "on_node_start":
+                    node_name = event.get("name")
+                    yield {"event": "node_update", "data": json.dumps({"node": node_name, "status": "active"})}
                 
-                if "response" in node_data:
-                    yield {"event": "final_response", "data": json.dumps({
-                        "response": node_data["response"],
-                        "ticket_id": node_data.get("ticket_id"),
-                        "escalation": node_data.get("escalation")
-                    })}
+                # 2. Token Streaming (from LLM calls within nodes)
+                if kind == "on_chat_model_stream":
+                    content = event["data"]["chunk"].content
+                    if content:
+                        yield {"event": "token", "data": json.dumps({"token": content})}
+                
+                # 3. Final Node Updates (Metadata & Token Consolidation)
+                if kind == "on_chain_end":
+                    # We look for the final output of the entire graph
+                    output = event.get("data", {}).get("output")
+                    if isinstance(output, dict) and "response" in output:
+                        full_response_content = output["response"]
+                        # Only emit if we haven't already streamed it as tokens
+                        if not full_response_content: 
+                            yield {"event": "final_response", "data": json.dumps({
+                                "response": full_response_content,
+                                "ticket_id": output.get("ticket_id"),
+                                "escalation": output.get("escalation")
+                            })}
+            
+            # Record to Audit Log
+            audit_cursor.execute("INSERT INTO logs VALUES (datetime('now'), ?, ?, ?, ?)", 
+                                (thread_id, request.message, request.provider, full_response_content))
+            audit_conn.commit()
+            audit_conn.close()
 
         except Exception as e:
+            print(f"[CRITICAL] Streaming Failure: {e}")
             yield {"event": "error", "data": str(e)}
 
     return EventSourceResponse(event_generator())

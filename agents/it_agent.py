@@ -41,9 +41,10 @@ class ITAgent:
         
         ticket_id = state.get("ticket_id")
         if "create a ticket" in response.content.lower():
-            # Tool call (manual simulation for this node, or could use LangChain tool binding)
-            ticket_id = create_ticket.invoke(query)
-            response_text = f"{response.content}\n\n[System Output] Ticket ID: {ticket_id}"
+            # Tool call (manual simulation for this node)
+            ticket_data = create_ticket.invoke(query)
+            ticket_id = ticket_data["id"]
+            response_text = f"{response.content}\n\n[🎫 Ticket Created]\nID: {ticket_id}\nPriority: {ticket_data['priority']}\nEndpoint: {ticket_data['cluster_node']}"
         else:
             response_text = response.content
 

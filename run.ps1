@@ -1,32 +1,32 @@
-# Enterprise AI Service Desk - Setup & Run Script
-# This script automates venv creation, dependency installation, and concurrent execution.
+# Enterprise AI Service Desk - High-Speed Runner
+Stop-Process -Name python -Force -ErrorAction SilentlyContinue
+Stop-Process -Name node -Force -ErrorAction SilentlyContinue
 
-if (!(Test-Path "venv")) {
-    Write-Host "Step 1/3: Creating Python Virtual Environment..." -ForegroundColor Cyan
-    python -m venv venv
+Write-Host '🚀 Launching Cluster...' -ForegroundColor Green
+
+# Ensure we are in the root directory relative to this script
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $ScriptRoot
+$ROOT_DIR = $ScriptRoot
+
+$PYTHON_EXE = "$ROOT_DIR\venv\Scripts\python.exe"
+$BACKEND_SCRIPT = "$ROOT_DIR\api\main.py"
+
+# Verify virtual environment exists
+if (-not (Test-Path $PYTHON_EXE)) {
+    Write-Error "Virtual environment not found at $PYTHON_EXE. Please run 'python -m venv venv' first."
+    exit 1
+}
+
+# Start Backend
+$BACKEND_CMD = "`$env:PYTHONPATH = '$ROOT_DIR'; & '$PYTHON_EXE' '$BACKEND_SCRIPT'"
+Start-Process powershell -ArgumentList '-NoExit', '-Command', $BACKEND_CMD
+
+# Start Frontend
+if (Test-Path "frontend") {
+    Set-Location frontend
+    npm run dev -- --port 3000
 }
 else {
-    Write-Host "Step 1/3: Virtual environment already exists. Skipping creation." -ForegroundColor Gray
+    Write-Error "Frontend directory not found!"
 }
-
-Write-Host "Step 2/3: Syncing Python dependencies..." -ForegroundColor Cyan
-./venv/Scripts/python -m pip install --upgrade pip
-./venv/Scripts/python -m pip install -r requirements.txt
-
-Write-Host "Step 3/3: Syncing Frontend dependencies..." -ForegroundColor Cyan
-Set-Location frontend
-npm install
-Set-Location ..
-
-Write-Host "`n🚀 Launching Enterprise AI Orchestrator Cluster..." -ForegroundColor Green
-Write-Host "--------------------------------------------------" -ForegroundColor Gray
-Write-Host "Backend API: http://localhost:8000" -ForegroundColor Blue
-Write-Host "Frontend UI: http://localhost:3000" -ForegroundColor DarkMagenta
-Write-Host "--------------------------------------------------`n" -ForegroundColor Gray
-
-# Start the Backend in a separate process window
-$BackendCmd = "`$env:PYTHONPATH = '$PWD'; & './venv/Scripts/python' 'api/main.py'"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "$BackendCmd"
-
-# Start the Frontend in the current terminal (force port 3000)
-npm run dev --prefix frontend -- --port 3000 --strictPort

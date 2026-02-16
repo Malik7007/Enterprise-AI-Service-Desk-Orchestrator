@@ -14,12 +14,21 @@ class SupervisorAgent:
     def classify(self, state: AgentState) -> dict:
         """
         Classifies the user intent into HR, IT, Finance, Multi-intent, or Unknown.
-        @param state - Current graph state
-        @returns Updated state with intent and confidence
         """
+        last_message = state['messages'][-1].content
+        
+        # Immediate short-circuit for simple greetings
+        if any(x in last_message.lower() for x in ["hi", "hello", "hey"]):
+            print(f"[NODE] Supervisor handled greeting.")
+            return {
+                "intent": "Greeting",
+                "confidence": 1.0,
+                "response": "Hello! I am your Enterprise Service Assistant. How can I help you today?",
+                "all_responses": ["Assistant: Hello! I am your Enterprise Service Assistant. How can I help you today?"]
+            }
+
         config = state.get("config_override", {})
         llm = get_llm(node_type="supervisor", config=config)
-        last_message = state['messages'][-1].content
         
         prompt = f"""
         Analyze the following user query for an enterprise service desk and classify it.

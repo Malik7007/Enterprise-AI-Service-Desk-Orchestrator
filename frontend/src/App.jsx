@@ -3,41 +3,67 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Send, Bot, User, Settings, Shield, Cpu,
     Layers, HardDrive, FileText, Share2,
-    Activity, CheckCircle2, AlertCircle, ChevronRight,
+    Activity, CircleCheck as CheckCircle2, AlertCircle, ChevronRight,
     Plus, Upload, Globe, Database, Network, Clock, LifeBuoy
 } from 'lucide-react';
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+/**
+ * Utility for Tailwind class merging
+ */
 function cn(...inputs) {
     return twMerge(clsx(inputs));
 }
 
 const App = () => {
+    // Console log for debugging mount
+    useEffect(() => {
+        console.log("Alpha-V2 Dashboard Mounting...");
+    }, []);
+
     const [messages, setMessages] = useState([
         { role: 'assistant', content: "Alpha-V2 Cluster Active. Cluster Identity Verified. How can I assist you today?", id: 'initial' }
     ]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
+
+    // Config state
     const [activeProvider, setActiveProvider] = useState('openai');
-    const [apiKeys, setApiKeys] = useState({ openai: '', groq: '', openrouter: '', local: 'http://localhost:11434' });
+    const [apiKeys, setApiKeys] = useState({
+        openai: '',
+        groq: '',
+        openrouter: '',
+        local: 'http://localhost:11434'
+    });
+
     const [selectedModel, setSelectedModel] = useState('');
     const [availableModels, setAvailableModels] = useState([]);
+
+    // UI state
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState('ai');
     const [threadId, setThreadId] = useState(null);
     const [executionLogs, setExecutionLogs] = useState([]);
     const [isConsoleOpen, setIsConsoleOpen] = useState(false);
     const [rawLogs, setRawLogs] = useState([]);
+
+    // KB state
     const [kbFiles, setKbFiles] = useState([
         { name: 'it_policy_2024.pdf', size: '2.4 MB', type: 'IT', time: 'Indexed' },
         { name: 'hr_manual_v3.docx', size: '1.8 MB', type: 'HR', time: 'Indexed' }
     ]);
     const [uploading, setUploading] = useState(false);
+
     const chatEndRef = useRef(null);
 
+    /**
+     * Scroll to latest message
+     */
     const scrollToBottom = () => {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        if (chatEndRef.current) {
+            chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
     };
 
     useEffect(() => {
@@ -45,12 +71,15 @@ const App = () => {
     }, [messages, isTyping]);
 
     const providers = {
-        openai: { name: 'OpenAI', icon: <Cpu /> },
-        groq: { name: 'Groq', icon: <Activity /> },
-        openrouter: { name: 'OpenRouter', icon: <Globe /> },
-        local: { name: 'Local (Ollama)', icon: <HardDrive /> }
+        openai: { name: 'OpenAI', icon: <Cpu className="w-full h-full" /> },
+        groq: { name: 'Groq', icon: <Activity className="w-full h-full" /> },
+        openrouter: { name: 'OpenRouter', icon: <Globe className="w-full h-full" /> },
+        local: { name: 'Local (Ollama)', icon: <HardDrive className="w-full h-full" /> }
     };
 
+    /**
+     * Fetch models from selected provider
+     */
     const fetchModels = async (provider, key) => {
         if (!key && provider !== 'local') return;
         try {
@@ -63,31 +92,48 @@ const App = () => {
                     base_url: provider === 'local' ? key : null
                 })
             });
+
+            if (!res.ok) throw new Error("Fetch failed");
+
             const data = await res.json();
-            if (data.models && data.models.length > 0) {
+            if (data.models && Array.isArray(data.models) && data.models.length > 0) {
                 setAvailableModels(data.models);
-                if (!data.models.includes(selectedModel)) {
+                // Auto-select first if none selected
+                if (!selectedModel || !data.models.includes(selectedModel)) {
                     setSelectedModel(data.models[0]);
                 }
-                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Fetched ${data.models.length} ${provider} models.`, type: 'success' }]);
+                setRawLogs(prev => [...prev, {
+                    time: new Date().toLocaleTimeString(),
+                    msg: `Fetched ${data.models.length} ${provider} models.`,
+                    type: 'success'
+                }]);
             }
         } catch (e) {
-            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Failed to fetch ${provider} models.`, type: 'error' }]);
+            console.error("Model fetch error:", e);
+            setRawLogs(prev => [...prev, {
+                time: new Date().toLocaleTimeString(),
+                msg: `Failed to fetch ${provider} models. Check API key/URL.`,
+                type: 'error'
+            }]);
         }
     };
 
     // Auto-fetch local models on mount and provider switch
     useEffect(() => {
         if (!isSettingsOpen) return;
+        const currentKey = apiKeys[activeProvider];
         if (activeProvider === 'local') {
-            fetchModels('local', apiKeys.local);
-        } else if (apiKeys[activeProvider].length > 5) {
-            fetchModels(activeProvider, apiKeys[activeProvider]);
+            fetchModels('local', currentKey);
+        } else if (currentKey && currentKey.length > 5) {
+            fetchModels(activeProvider, currentKey);
         }
     }, [activeProvider, isSettingsOpen]);
 
+    /**
+     * Handle RAG file upload
+     */
     const handleFileUpload = async (e, domain) => {
-        const file = e.target.files[0];
+        const file = e.target.files?.[0];
         if (!file) return;
 
         setUploading(true);
@@ -101,18 +147,39 @@ const App = () => {
                 body: formData
             });
             if (res.ok) {
-                setKbFiles(prev => [{ name: file.name, size: (file.size / 1024 / 1024).toFixed(1) + ' MB', type: domain, time: 'Just now' }, ...prev]);
-                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Asset indexed: ${file.name} [${domain}]`, type: 'success' }]);
+                setKbFiles(prev => [
+                    {
+                        name: file.name,
+                        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                        type: domain,
+                        time: 'Just now'
+                    },
+                    ...prev
+                ]);
+                setRawLogs(prev => [...prev, {
+                    time: new Date().toLocaleTimeString(),
+                    msg: `Asset indexed: ${file.name} [${domain}]`,
+                    type: 'success'
+                }]);
             }
         } catch (e) {
-            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Upload failed: ${file.name}`, type: 'error' }]);
+            console.error("Upload failed:", e);
+            setRawLogs(prev => [...prev, {
+                time: new Date().toLocaleTimeString(),
+                msg: `Upload failed: ${file.name}`,
+                type: 'error'
+            }]);
         } finally {
             setUploading(false);
+            if (e.target) e.target.value = ''; // Reset input
         }
     };
 
+    /**
+     * Submit chat request
+     */
     const handleSubmit = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         if (!input.trim() || isTyping) return;
 
         const userMsg = { role: 'user', content: input, id: Date.now().toString() };
@@ -120,8 +187,16 @@ const App = () => {
         setInput('');
         setIsTyping(true);
 
+        let assistantMsgId = Date.now().toString() + "-ai";
+        let fullContent = "";
+
+        // Initial telemetry
         setExecutionLogs([{ node: 'privacy_shield', status: 'active', label: 'Privacy Shield', detail: 'Scanning PII...' }]);
-        setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Request Dispatched to Cluster...`, type: 'info' }]);
+        setRawLogs(prev => [...prev, {
+            time: new Date().toLocaleTimeString(),
+            msg: `Request Dispatched to Cluster...`,
+            type: 'info'
+        }]);
 
         try {
             const response = await fetch('http://localhost:8000/chat', {
@@ -140,6 +215,8 @@ const App = () => {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
+            let currentEvent = 'message';
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -148,10 +225,47 @@ const App = () => {
                 const lines = chunk.split('\n');
 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) continue;
+
+                    if (trimmedLine.startsWith('event: ')) {
+                        currentEvent = trimmedLine.substring(7).trim();
+                    } else if (trimmedLine.startsWith('data: ')) {
+                        const rawData = trimmedLine.substring(6).trim();
                         try {
-                            const data = JSON.parse(line.substring(6));
+                            const data = JSON.parse(rawData);
                             if (data.thread_id) setThreadId(data.thread_id);
+
+                            // Auto-infer token event if missing to ensure display
+                            if (data.token) currentEvent = 'token';
+
+                            if (data.token || currentEvent === 'token') {
+                                const newChunk = data.token || "";
+                                fullContent += newChunk; // Keep local ref for other logic
+
+                                setMessages(prev => {
+                                    const exists = prev.find(m => m.id === assistantMsgId);
+                                    if (exists) {
+                                        return prev.map(m => m.id === assistantMsgId ? {
+                                            ...m,
+                                            content: m.content + newChunk // Append atomically
+                                        } : m);
+                                    } else {
+                                        return [...prev, {
+                                            role: 'assistant',
+                                            content: newChunk,
+                                            id: assistantMsgId,
+                                            streaming: true
+                                        }];
+                                    }
+                                });
+                            }
+
+                            if (currentEvent === 'error') {
+                                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Cluster Error: ${rawData}`, type: 'error' }]);
+                                setMessages(prev => [...prev, { role: 'assistant', content: `Backend Error: ${data.detail || rawData}`, id: Date.now().toString() }]);
+                                continue;
+                            }
 
                             if (data.node) {
                                 setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Node Active: ${data.node}`, type: 'node' }]);
@@ -183,25 +297,52 @@ const App = () => {
                                 });
                             }
 
-                            if (data.response) {
-                                setMessages(prev => [...prev, { role: 'assistant', content: data.response, id: Date.now().toString(), ...data }]);
-                                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Response Synthesized Successfully.`, type: 'success' }]);
+                            if (data.response && currentEvent === 'final_response') {
+                                fullContent = data.response; // Ensure final sync
+                                setMessages(prev => {
+                                    return prev.map(m => m.id === assistantMsgId ? {
+                                        role: 'assistant',
+                                        content: data.response,
+                                        id: assistantMsgId,
+                                        streaming: false,
+                                        ...data
+                                    } : m);
+                                });
+                                setRawLogs(prev => [...prev, {
+                                    time: new Date().toLocaleTimeString(),
+                                    msg: `Response Finalized.`,
+                                    type: 'success'
+                                }]);
                             }
                         } catch (e) {
-                            console.error("Parse Error", e);
+                            if (currentEvent === 'error') {
+                                setMessages(prev => [...prev, { role: 'assistant', content: `Cluster Error: ${rawData}`, id: Date.now().toString() }]);
+                            }
                         }
                     }
                 }
             }
 
         } catch (error) {
-            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Cluster Error: ${error.message}`, type: 'error' }]);
-            setMessages(prev => [...prev, { role: 'assistant', content: "Backend offline. Please use ./run.ps1 to start the cluster.", id: Date.now().toString() }]);
+            console.error("Cluster submission error:", error);
+            setRawLogs(prev => [...prev, {
+                time: new Date().toLocaleTimeString(),
+                msg: `Cluster Error: ${error.message}`,
+                type: 'error'
+            }]);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "Cluster connectivity failure. Ensure the backend is running via ./run.ps1.",
+                id: Date.now().toString()
+            }]);
         } finally {
             setIsTyping(false);
         }
     };
 
+    /**
+     * Approve manual escalation
+     */
     const handleApprove = async () => {
         if (!threadId) return;
         setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `User override sent.`, type: 'hitl' }]);
@@ -210,7 +351,7 @@ const App = () => {
             if (response.ok) {
                 setMessages(prev => [...prev, { role: 'assistant', content: "Manual escalation approved. Resuming cycle...", id: Date.now().toString() }]);
             }
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error("Escalation approval error:", e); }
     };
 
     return (
@@ -220,7 +361,7 @@ const App = () => {
                 <div className="p-6 border-b border-white/5">
                     <div className="flex items-center gap-3 mb-2">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center p-2 shadow-lg shadow-purple-500/20">
-                            <Shield className="w-full h-full" />
+                            <Shield className="w-full h-full text-white" />
                         </div>
                         <div>
                             <h1 className="font-bold text-lg tracking-tight">ARFANITY</h1>
@@ -472,8 +613,8 @@ const App = () => {
                                 <div className="p-10 pb-4 flex items-center justify-between border-b border-white/5 bg-white/[0.01]">
                                     <div className="flex gap-6">
                                         {[
-                                            { id: 'ai', label: 'Models', icon: <Cpu /> },
-                                            { id: 'kb', label: 'Knowledge Base', icon: <Database /> }
+                                            { id: 'ai', label: 'Models', icon: <Cpu className="w-4 h-4" /> },
+                                            { id: 'kb', label: 'Knowledge Base', icon: <Database className="w-4 h-4" /> }
                                         ].map(tab => (
                                             <button
                                                 key={tab.id}
@@ -483,7 +624,7 @@ const App = () => {
                                                     settingsTab === tab.id ? "bg-white text-black shadow-2xl scale-105" : "text-white/20 hover:text-white/50 hover:bg-white/5"
                                                 )}
                                             >
-                                                {React.cloneElement(tab.icon, { className: "w-4 h-4" })}
+                                                {tab.icon}
                                                 {tab.label}
                                             </button>
                                         ))}
@@ -507,7 +648,7 @@ const App = () => {
                                                         )}
                                                     >
                                                         <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-xl", activeProvider === id ? "bg-blue-600 text-white" : "bg-white/5 text-white/30 group-hover:text-white/60")}>
-                                                            {React.cloneElement(p.icon, { className: "w-7 h-7" })}
+                                                            {p.icon}
                                                         </div>
                                                         <p className="font-black uppercase tracking-[0.2em] text-[13px]">{p.name}</p>
                                                     </button>
@@ -528,7 +669,7 @@ const App = () => {
                                                         value={apiKeys[activeProvider]}
                                                         onChange={(e) => {
                                                             const val = e.target.value;
-                                                            setApiKeys({ ...apiKeys, [activeProvider]: val });
+                                                            setApiKeys(prev => ({ ...prev, [activeProvider]: val }));
                                                             if (val.length > 5) fetchModels(activeProvider, val);
                                                         }}
                                                         className="w-full bg-black/40 border border-white/10 rounded-2xl py-6 pl-16 pr-8 font-mono text-[13px] focus:border-blue-500/50 outline-none transition-all placeholder-white/5"
@@ -546,7 +687,7 @@ const App = () => {
                                                         onChange={(e) => setSelectedModel(e.target.value)}
                                                         className="w-full bg-black/40 border border-white/10 rounded-2xl py-6 pl-16 pr-8 font-black text-[13px] uppercase tracking-widest outline-none cursor-pointer appearance-none focus:border-blue-500/50"
                                                     >
-                                                        {availableModels.length === 0 ? <option>Sync Identity to Load Models...</option> : availableModels.map(m => <option key={m} className="bg-[#050505]">{m}</option>)}
+                                                        {availableModels.length === 0 ? <option>Sync Identity to Load Models...</option> : availableModels.map(m => <option key={m} value={m} className="bg-[#050505]">{m}</option>)}
                                                     </select>
                                                 </div>
                                             </div>

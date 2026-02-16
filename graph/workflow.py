@@ -10,6 +10,9 @@ from agents.governance import GovernanceAgent
 from config import CONFIDENCE_THRESHOLD
 import sqlite3
 
+# Initializing In-Memory Persistence (Stable)
+memory = MemorySaver()
+
 # Initialize Agents
 governance = GovernanceAgent()
 supervisor = SupervisorAgent()
@@ -66,6 +69,9 @@ def router_logic(state: AgentState):
     intent = state.get("intent")
     confidence = state.get("confidence", 0.0)
     
+    if intent == "Greeting":
+        return "finish"
+    
     if confidence < CONFIDENCE_THRESHOLD:
         return "escalation"
     
@@ -96,9 +102,6 @@ def build_workflow():
     2. Persistence (SqliteSaver)
     3. Human-In-The-Loop (Interrupts)
     """
-    # 1. Memory for Persistence (Transient)
-    memory = MemorySaver()
-    
     workflow = StateGraph(AgentState)
 
     # Define Nodes
@@ -125,7 +128,8 @@ def build_workflow():
             "it": "it",
             "finance": "finance",
             "planner": "planner",
-            "escalation": "escalation"
+            "escalation": "escalation",
+            "finish": "merge"
         }
     )
 

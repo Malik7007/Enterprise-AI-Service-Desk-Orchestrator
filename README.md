@@ -73,6 +73,6 @@ enterprise_ai_service_desk/
 *   **Enterprise Governance**: Mandatory PII filtering and sub-threshold confidence detection ensure high-stakes decisions always get human oversight.
 
 ---
-**Developer:** Arfan (Software Engineer)  
+**Developer:** Arfan (AI/ML Engineer)  
 **Email:** arfan.software.engineer@gmail.com  
 **Vision:** Towards Autonomous Enterprise Operations.
