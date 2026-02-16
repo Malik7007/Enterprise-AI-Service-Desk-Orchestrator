@@ -141,29 +141,55 @@ async def chat_stream(request: ChatRequest):
                     if content:
                         yield {"event": "token", "data": json.dumps({"token": content})}
                 
-                # 3. Final Node Updates (Metadata & Token Consolidation)
+                # 3. Agent Thought/Decision Capture (Node Outputs)
                 if kind == "on_chain_end":
+                    node_name = event.get("name")
+                    raw_output = event.get("data", {}).get("output")
+                    
+                    def serialize_output(obj):
+                        if hasattr(obj, "dict"): return obj.dict()
+                        if hasattr(obj, "to_json"): return obj.to_json()
+                        if isinstance(obj, (list, tuple)): return [serialize_output(x) for x in obj]
+                        if isinstance(obj, dict): return {k: serialize_output(v) for k, v in obj.items()}
+                        if hasattr(obj, "content"): return obj.content # Handle LangChain Messages
+                        return str(obj)
+
+                    # Filter for our specific agent nodes
+                    if node_name in ["supervisor", "planner", "it", "hr", "finance", "privacy_shield", "consume_task"]:
+                        safe_output = serialize_output(raw_output)
+                        yield {"event": "agent_thought", "data": json.dumps({
+                            "node": node_name,
+                            "output": safe_output,
+                            "status": "completed"
+                        })}
+
+                # 4. Final Graph Output (Metadata & Token Consolidation)
+                if kind == "on_chain_end" and event.get("name") == "LangGraph":
                     # We look for the final output of the entire graph
                     output = event.get("data", {}).get("output")
                     if isinstance(output, dict) and "response" in output:
                         full_response_content = output["response"]
-                        # Only emit if we haven't already streamed it as tokens
-                        if not full_response_content: 
-                            yield {"event": "final_response", "data": json.dumps({
-                                "response": full_response_content,
-                                "ticket_id": output.get("ticket_id"),
-                                "escalation": output.get("escalation")
-                            })}
+                        # ALWAYS emit final response to ensure frontend state (streaming=false) resolves correctly
+                        yield {"event": "final_response", "data": json.dumps({
+                            "response": full_response_content,
+                            "ticket_id": output.get("ticket_id"),
+                            "escalation": output.get("escalation")
+                        })}
             
-            # Record to Audit Log
-            audit_cursor.execute("INSERT INTO logs VALUES (datetime('now'), ?, ?, ?, ?)", 
-                                (thread_id, request.message, request.provider, full_response_content))
-            audit_conn.commit()
-            audit_conn.close()
-
         except Exception as e:
             print(f"[CRITICAL] Streaming Failure: {e}")
             yield {"event": "error", "data": str(e)}
+        
+        finally:
+            # Record to Audit Log (Always runs)
+            if full_response_content:
+                try:
+                    audit_cursor.execute("INSERT INTO logs VALUES (datetime('now'), ?, ?, ?, ?)", 
+                                        (thread_id, request.message, request.provider, full_response_content))
+                    audit_conn.commit()
+                except Exception as db_e:
+                    print(f"[AUDIT] Failed to write log: {db_e}")
+            audit_conn.close()
 
     return EventSourceResponse(event_generator())
 

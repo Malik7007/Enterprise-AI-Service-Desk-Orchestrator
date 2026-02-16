@@ -1,78 +1,87 @@
-# Enterprise AI Service Desk Orchestrator (Alpha-V2)
+# Enterprise AI Service Desk Orchestrator
 
-🚀 **Production-grade Multi-Agent AI System** built with **LangGraph**, **LangChain**, and **FastAPI**.
+![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Python](https://img.shields.io/badge/python-3.10+-blue.svg) ![React](https://img.shields.io/badge/react-18-blue.svg) ![LangGraph](https://img.shields.io/badge/LangGraph-0.1-orange.svg)
 
-This system is an advanced demonstration of **Agentic AI Orchestration**, featuring a self-correcting multi-agent cluster that handles Enterprise IT, HR, and Finance service requests with built-in governance and human-in-the-loop fallback.
+**Production-Grade Multi-Agent System** for Enterprise IT, HR, and Finance operations. Built with a decentralized cognitive architecture to handle complex, multi-step requests with privacy, governance, and persistence as first-class citizens.
 
-## 🏗️ Technical Architecture
+## 🚀 Key Capabilities
 
-The system implements a **Decentralized Cognitive Architecture**:
+*   **🛡️ Privacy First**: Middleware intercepts all prompts to redact PII (Personally Identifiable Information) before it touches the LLM.
+*   **🧠 Cognitive Router**: A Supervisor Agent classifies intent and routes queries to specialized domain experts (IT, HR, Finance) or a Task Planner for complex workflows.
+*   **💾 Persistent Memory**: Uses SQLite checkpoints to maintain conversation state across sessions and server restarts.
+*   **⚡ True Streaming**: Granular token-by-token streaming for a responsive "typing" feel, even during complex RAG operations.
+*   **📂 Enterprise RAG**: Ingests PDF, DOCX, and Markdown files into domain-specific vector stores (FAISS) for grounded answers.
+*   **🔧 Auditable Actions**: All agent decisions and tool outputs are logged to a tamper-evident audit database (`audit_log.db`).
 
-1.  **Privacy Shield (Governance)**: The first line of defense. Scans and redacts PII/Sensitive data before it enters the LLM reasoning cycle.
-2.  **Supervisor (Cognitive Router)**: Classifies user intent and assigns confidence scores. It selects the optimal domain agent or triggers the Planner.
-3.  **Task Planner (Complexity Handler)**: For multi-step queries like *"My laptop is broken and I'm on leave"*, the Planner decomposes the prompt into discrete task objects for sequential processing.
-4.  **Domain Clusters (Isolated RAG)**: 
-    *   **IT Agent**: Troubleshoots hardware/software using its specific knowledge base and creates tickets via tools.
-    *   **HR Agent**: Grounded in corporate policy docs for leave, payroll, and benefits.
-    *   **Finance Agent**: Validates reimbursements and provides financial policy guidance.
-5.  **Execution Persistence**: Uses LangGraph checkpoints to maintain conversation state and handle human interrupts (HITL).
+## 🏗️ Quick Start
 
-## 🧩 Premium Features (Alpha-V2)
+### Prerequisites
+*   **Python 3.10+**
+*   **Node.js 18+**
+*   (Optional) API Keys for OpenAI/Groq or a local Ollama instance.
 
-*   **Runtime AI Gateway**: Configure API keys (OpenAI, Groq, OpenRouter) or Local Ollama endpoints directly in the UI without restarting the cluster.
-*   **Live Orchestration Telemetry**: A real-time execution console that shows the visual "handover" between agents as they reason through your request.
-*   **Knowledge Base Management**: Management UI for indexing local document assets (PDF/DOCX) into the vector store.
-*   **Glassmorphism UI**: A high-fidelity "Control Center" dashboard built with React, Framer Motion, and Tailwind CSS v4.
-*   **Local Intelligence Integration**: Verified support for **Ollama** (Llama3, Mistral) for 100% private local orchestration.
-
-## 🚀 Quick Start (One Command)
-
-The entire cluster (Backend API, Frontend UI, and Python Venv) can be launched with a single script:
+### One-Command Launch (Windows/Linx/Mac)
+We provide a unified orchestrator script that sets up the environment, installs dependencies, and launches both backend and frontend.
 
 ```powershell
 ./run.ps1
 ```
 
-### Manual Setup
-
-**1. Backend (Python 3.10+):**
+### Manual Installation
+**Backend**
 ```bash
 python -m venv venv
+# On Windows:
 ./venv/Scripts/activate
+# On Mac/Linux:
+source venv/bin/activate
+
 pip install -r requirements.txt
 python api/main.py
 ```
 
-**2. Frontend (Node 18+):**
+**Frontend**
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --port 3000
 ```
 
-## 📁 Project Structure
+## 🧩 System Architecture
 
-```text
-enterprise_ai_service_desk/
-│
-├── agents/         # LLM logic for Supervisor, Planner, and Domain experts
-├── api/            # FastAPI endpoints & SSE streaming implementation
-├── graph/          # LangGraph state management & workflow connectivity
-├── rag/            # Vector store management with Semantic Chunking
-├── tools/          # Functional tools (IT Ticketing, Finance Validation)
-├── data/           # Mock Enterprise knowledge base (Markdown/PDF)
-├── frontend/       # React SPA with advanced orchestration visualizer
-├── config.py       # Global cluster settings
-└── run.ps1         # Unified startup orchestrator
+The system follows a **Hub-and-Spoke** agent topology managed by LangGraph.
+
+1.  **User Request** -> **Privacy Shield** (PII Redaction)
+2.  **Supervisor** (Intent Classification)
+3.  **Routing**:
+    *   *Simple Intent* -> **Domain Agent** (HR/IT/Finance)
+    *   *Complex Intent* -> **Planner Agent** -> Decomposes into **Task Queue**
+4.  **Execution**:
+    *   Agents use **Tools** (e.g., `create_ticket`, `search_knowledge_base`)
+    *   Agents use **RAG** (Vector Search)
+5.  **Response Synthesis**:
+    *   Responses are merged and streamed back to the user via **SSE (Server-Sent Events)**.
+
+See [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md) for a deep dive.
+
+## 🛡️ Governance & Compliance
+
+*   **Audit Logging**: Every interaction is recorded in `audit_log.db` with timestamps, provider metadata, and full response content.
+*   **Human-in-the-Loop (HITL)**: If the Supervisor confidence score drops below 0.7, the system automatically escalates to a human operator (simulated via interrupt signal).
+
+## 🛠️ Configuration
+
+Edit `config.py` to tune system behavior:
+
+```python
+CONFIDENCE_THRESHOLD = 0.7  # Trigger escalation below this
+MAX_RECURSION_LIMIT = 20    # Prevent infinite loops in complex plans
 ```
 
-## 🧠 Why this Architecture?
+## 🤝 Contributing
 
-*   **LangGraph over Chains**: Standard LLM chains are linear. LangGraph allows for **cycles** and **looping logic**, enabling the agents to verify their own work or ask for clarification.
-*   **Isolated Knowledge Domains**: Prevents "Knowledge Leakage" where an agent might hallucinate HR policy into an IT ticket.
-*   **Enterprise Governance**: Mandatory PII filtering and sub-threshold confidence detection ensure high-stakes decisions always get human oversight.
+We welcome contributions! Please see `CONTRIBUTING.md` (coming soon) for guidelines.
 
----
-**Developer:** Arfan (AI/ML Engineer)  
-**Email:** arfan.software.engineer@gmail.com  
-**Vision:** Towards Autonomous Enterprise Operations.
+## 📄 License
+
+MIT License. See `LICENSE` for details.

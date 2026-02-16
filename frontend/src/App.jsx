@@ -43,6 +43,7 @@ const App = () => {
     // UI state
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState('ai');
+    const [agentThoughts, setAgentThoughts] = useState([]); // New Visualizer State
     const [threadId, setThreadId] = useState(null);
     const [executionLogs, setExecutionLogs] = useState([]);
     const [isConsoleOpen, setIsConsoleOpen] = useState(false);
@@ -190,6 +191,15 @@ const App = () => {
         let assistantMsgId = Date.now().toString() + "-ai";
         let fullContent = "";
 
+        // Initial placeholder for immediate feedback
+        setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'Thinking...',
+            id: assistantMsgId,
+            streaming: true,
+            isPlaceholder: true // Flag to clear on first token
+        }]);
+
         // Initial telemetry
         setExecutionLogs([{ node: 'privacy_shield', status: 'active', label: 'Privacy Shield', detail: 'Scanning PII...' }]);
         setRawLogs(prev => [...prev, {
@@ -216,6 +226,7 @@ const App = () => {
             const decoder = new TextDecoder();
 
             let currentEvent = 'message';
+            let isFirstToken = true; // Track if we need to clear the placeholder
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -239,18 +250,38 @@ const App = () => {
                             // Auto-infer token event if missing to ensure display
                             if (data.token) currentEvent = 'token';
 
+                            // Capture Agent Thoughts for Visualizer
+                            if (currentEvent === 'agent_thought') {
+                                setAgentThoughts(prev => {
+                                    // Check if we already have this node execution to avoid duplicates
+                                    const exists = prev.find(t => t.node === data.node && JSON.stringify(t.output) === JSON.stringify(data.output));
+                                    if (exists) return prev;
+
+                                    return [...prev, {
+                                        node: data.node,
+                                        output: data.output,
+                                        timestamp: new Date().toLocaleTimeString()
+                                    }];
+                                });
+                            }
+
                             if (data.token || currentEvent === 'token') {
                                 const newChunk = data.token || "";
                                 fullContent += newChunk; // Keep local ref for other logic
 
                                 setMessages(prev => {
+                                    // If this is the first token, we overwrite the 'Thinking...' placeholder entirely
+                                    // Otherwise we append
                                     const exists = prev.find(m => m.id === assistantMsgId);
+
                                     if (exists) {
                                         return prev.map(m => m.id === assistantMsgId ? {
                                             ...m,
-                                            content: m.content + newChunk // Append atomically
+                                            content: isFirstToken ? newChunk : m.content + newChunk,
+                                            isPlaceholder: false
                                         } : m);
                                     } else {
+                                        // Fallback if placeholder was somehow lost
                                         return [...prev, {
                                             role: 'assistant',
                                             content: newChunk,
@@ -259,6 +290,8 @@ const App = () => {
                                         }];
                                     }
                                 });
+
+                                if (newChunk) isFirstToken = false;
                             }
 
                             if (currentEvent === 'error') {
@@ -550,23 +583,76 @@ const App = () => {
                                     <button onClick={() => setIsConsoleOpen(false)}><Plus className="w-5 h-5 text-white/20 rotate-45" /></button>
                                 </div>
                             </div>
-                            <div className="flex-1 p-10 py-6 overflow-y-auto font-mono text-[12px] space-y-3 bg-gradient-to-br from-black to-[#050505]">
-                                {rawLogs.length === 0 ? (
+                            <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-br from-black to-[#050505] space-y-6">
+                                {agentThoughts.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center opacity-10">
-                                        <Database className="w-12 h-12 mb-4" />
-                                        <p className="text-[10px] font-black uppercase tracking-[0.5em]">System Dormant</p>
+                                        <Database className="w-16 h-16 mb-4" />
+                                        <p className="text-xs font-black uppercase tracking-[0.5em]">Waiting for Cognition...</p>
                                     </div>
                                 ) : (
-                                    rawLogs.map((log, i) => (
-                                        <div key={i} className="flex gap-6 animate-in fade-in slide-in-from-left-2 transition-all">
-                                            <span className="text-[10px] font-black text-white/10 select-none shrink-0 tracking-tighter mt-0.5">[{log.time}]</span>
-                                            <span className={cn(
-                                                "leading-relaxed font-bold tracking-tight",
-                                                log.type === 'error' ? "text-red-500/80" :
-                                                    log.type === 'node' ? "text-purple-500/80" :
-                                                        log.type === 'success' ? "text-emerald-500/80" :
-                                                            log.type === 'hitl' ? "text-amber-500/80" : "text-white/40"
-                                            )}>{log.msg}</span>
+                                    agentThoughts.map((thought, i) => (
+                                        <div key={i} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                            <div className="flex items-center justify-between mb-2 px-2">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={cn("w-2 h-2 rounded-full ring-4 ring-offset-black ring-offset-2",
+                                                        thought.node === 'supervisor' ? "bg-purple-500 ring-purple-500/20" :
+                                                            thought.node === 'planner' ? "bg-blue-500 ring-blue-500/20" :
+                                                                ['it', 'hr', 'finance'].includes(thought.node) ? "bg-emerald-500 ring-emerald-500/20" :
+                                                                    "bg-amber-500 ring-amber-500/20"
+                                                    )} />
+                                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{thought.node} AGENT</span>
+                                                </div>
+                                                <span className="text-[9px] font-mono text-white/20">{thought.timestamp}</span>
+                                            </div>
+
+                                            <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 relative overflow-hidden group hover:bg-white/[0.04] transition-colors">
+                                                {/* Supervisor Output */}
+                                                {thought.node === 'supervisor' && thought.output?.next && (
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                                                            <Activity className="w-5 h-5 text-purple-400" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[10px] uppercase tracking-widest text-purple-400/60 font-bold mb-0.5">Router Decision</p>
+                                                            <p className="text-sm font-bold text-white">Delegated to {thought.output.next}</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Planner Output */}
+                                                {thought.node === 'planner' && thought.output?.tasks && (
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <CheckCircle2 className="w-4 h-4 text-blue-400" />
+                                                            <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Execution Plan</span>
+                                                        </div>
+                                                        {thought.output.tasks.map((t, idx) => (
+                                                            <div key={idx} className="flex gap-4 p-3 rounded-lg bg-black/40 border border-white/5">
+                                                                <span className="text-[10px] font-mono text-white/30 pt-0.5">0{idx + 1}</span>
+                                                                <div>
+                                                                    <div className="flex items-center gap-2 mb-1">
+                                                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold uppercase">{t.agent}</span>
+                                                                        <span className="text-[10px] text-white/40 font-mono">Pending</span>
+                                                                    </div>
+                                                                    <p className="text-xs text-white/80">{t.task}</p>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Generic/Domain Output */}
+                                                {!['supervisor', 'planner'].includes(thought.node) && (
+                                                    <div className="font-mono text-[11px] text-white/60 whitespace-pre-wrap leading-relaxed">
+                                                        {JSON.stringify(thought.output, null, 2).substring(0, 300)}...
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Connector Line */}
+                                            {i < agentThoughts.length - 1 && (
+                                                <div className="w-px h-6 bg-gradient-to-b from-white/10 to-transparent ml-3 my-1" />
+                                            )}
                                         </div>
                                     ))
                                 )}
