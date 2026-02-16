@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+checkpoints.db
+checkpoints.db-journal
+
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Local assets
+vector_stores/
+data/it_docs/
+data/hr_docs/
+data/finance_docs/
+*.log
