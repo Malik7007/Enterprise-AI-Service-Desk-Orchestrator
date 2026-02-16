@@ -15,20 +15,25 @@ function cn(...inputs) {
 
 const App = () => {
     const [messages, setMessages] = useState([
-        { role: 'assistant', content: "Alpha-V2 Cluster Active. PII Filtering & LangGraph Persistence Enabled. How can I assist you today?", id: 'initial' }
+        { role: 'assistant', content: "Alpha-V2 Cluster Active. Cluster Identity Verified. How can I assist you today?", id: 'initial' }
     ]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [activeProvider, setActiveProvider] = useState('openai');
     const [apiKeys, setApiKeys] = useState({ openai: '', groq: '', openrouter: '', local: 'http://localhost:11434' });
-    const [selectedModel, setSelectedModel] = useState('gpt-4o');
+    const [selectedModel, setSelectedModel] = useState('');
+    const [availableModels, setAvailableModels] = useState([]);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState('ai');
     const [threadId, setThreadId] = useState(null);
     const [executionLogs, setExecutionLogs] = useState([]);
     const [isConsoleOpen, setIsConsoleOpen] = useState(false);
     const [rawLogs, setRawLogs] = useState([]);
-    const [localModels, setLocalModels] = useState(['llama3', 'mistral', 'phi3']);
+    const [kbFiles, setKbFiles] = useState([
+        { name: 'it_policy_2024.pdf', size: '2.4 MB', type: 'IT', time: 'Indexed' },
+        { name: 'hr_manual_v3.docx', size: '1.8 MB', type: 'HR', time: 'Indexed' }
+    ]);
+    const [uploading, setUploading] = useState(false);
     const chatEndRef = useRef(null);
 
     const scrollToBottom = () => {
@@ -40,22 +45,69 @@ const App = () => {
     }, [messages, isTyping]);
 
     const providers = {
-        openai: { name: 'OpenAI', icon: <Cpu />, models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
-        groq: { name: 'Groq', icon: <Activity />, models: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'] },
-        openrouter: { name: 'OpenRouter', icon: <Globe />, models: ['anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5'] },
-        local: { name: 'Local Intelligence', icon: <HardDrive />, models: localModels }
+        openai: { name: 'OpenAI', icon: <Cpu /> },
+        groq: { name: 'Groq', icon: <Activity /> },
+        openrouter: { name: 'OpenRouter', icon: <Globe /> },
+        local: { name: 'Local (Ollama)', icon: <HardDrive /> }
     };
 
-    const fetchOllamaModels = async () => {
+    const fetchModels = async (provider, key) => {
+        if (!key && provider !== 'local') return;
         try {
-            const res = await fetch(`${apiKeys.local}/api/tags`);
+            const res = await fetch('http://localhost:8000/fetch-models', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider,
+                    api_key: key,
+                    base_url: provider === 'local' ? key : null
+                })
+            });
             const data = await res.json();
-            if (data.models) {
-                setLocalModels(data.models.map(m => m.name));
-                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Fetched ${data.models.length} Ollama models.`, type: 'success' }]);
+            if (data.models && data.models.length > 0) {
+                setAvailableModels(data.models);
+                if (!data.models.includes(selectedModel)) {
+                    setSelectedModel(data.models[0]);
+                }
+                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Fetched ${data.models.length} ${provider} models.`, type: 'success' }]);
             }
         } catch (e) {
-            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Ollama unavailable at ${apiKeys.local}`, type: 'error' }]);
+            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Failed to fetch ${provider} models.`, type: 'error' }]);
+        }
+    };
+
+    // Auto-fetch local models on mount and provider switch
+    useEffect(() => {
+        if (!isSettingsOpen) return;
+        if (activeProvider === 'local') {
+            fetchModels('local', apiKeys.local);
+        } else if (apiKeys[activeProvider].length > 5) {
+            fetchModels(activeProvider, apiKeys[activeProvider]);
+        }
+    }, [activeProvider, isSettingsOpen]);
+
+    const handleFileUpload = async (e, domain) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('domain', domain);
+
+        try {
+            const res = await fetch('http://localhost:8000/upload', {
+                method: 'POST',
+                body: formData
+            });
+            if (res.ok) {
+                setKbFiles(prev => [{ name: file.name, size: (file.size / 1024 / 1024).toFixed(1) + ' MB', type: domain, time: 'Just now' }, ...prev]);
+                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Asset indexed: ${file.name} [${domain}]`, type: 'success' }]);
+            }
+        } catch (e) {
+            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Upload failed: ${file.name}`, type: 'error' }]);
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -69,7 +121,7 @@ const App = () => {
         setIsTyping(true);
 
         setExecutionLogs([{ node: 'privacy_shield', status: 'active', label: 'Privacy Shield', detail: 'Scanning PII...' }]);
-        setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Dispatching query to Cluster...`, type: 'info' }]);
+        setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Request Dispatched to Cluster...`, type: 'info' }]);
 
         try {
             const response = await fetch('http://localhost:8000/chat', {
@@ -111,9 +163,9 @@ const App = () => {
                                         it: 'IT Agent',
                                         hr: 'HR Agent',
                                         finance: 'Finance Agent',
-                                        consume_task: 'Batch Processor',
-                                        escalation: 'Human Escalation',
-                                        merge: 'Response Merger'
+                                        consume_task: 'Decision Merging',
+                                        escalation: 'Human Verification',
+                                        merge: 'Response Synthesis'
                                     };
 
                                     const exists = prev.find(l => l.node === data.node);
@@ -133,7 +185,7 @@ const App = () => {
 
                             if (data.response) {
                                 setMessages(prev => [...prev, { role: 'assistant', content: data.response, id: Date.now().toString(), ...data }]);
-                                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Response finalized.`, type: 'success' }]);
+                                setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Response Synthesized Successfully.`, type: 'success' }]);
                             }
                         } catch (e) {
                             console.error("Parse Error", e);
@@ -143,7 +195,7 @@ const App = () => {
             }
 
         } catch (error) {
-            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Error: ${error.message}`, type: 'error' }]);
+            setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `Cluster Error: ${error.message}`, type: 'error' }]);
             setMessages(prev => [...prev, { role: 'assistant', content: "Backend offline. Please use ./run.ps1 to start the cluster.", id: Date.now().toString() }]);
         } finally {
             setIsTyping(false);
@@ -152,11 +204,11 @@ const App = () => {
 
     const handleApprove = async () => {
         if (!threadId) return;
-        setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `User manual override triggered.`, type: 'hitl' }]);
+        setRawLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), msg: `User override sent.`, type: 'hitl' }]);
         try {
             const response = await fetch(`http://localhost:8000/approve/${threadId}`, { method: 'POST' });
             if (response.ok) {
-                setMessages(prev => [...prev, { role: 'assistant', content: "Manual escalation approved. Resuming orchestration...", id: Date.now().toString() }]);
+                setMessages(prev => [...prev, { role: 'assistant', content: "Manual escalation approved. Resuming cycle...", id: Date.now().toString() }]);
             }
         } catch (e) { console.error(e); }
     };
@@ -172,16 +224,15 @@ const App = () => {
                         </div>
                         <div>
                             <h1 className="font-bold text-lg tracking-tight">ARFANITY</h1>
-                            <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Core Orchestrator v2.0</p>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Alpha-V2 Cluster</p>
                         </div>
                     </div>
                 </div>
 
                 <nav className="flex-1 overflow-y-auto p-6 space-y-8">
-                    {/* Agent Sequence */}
                     <div>
                         <div className="flex items-center justify-between mb-6">
-                            <label className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Live Agent Logic</label>
+                            <label className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Live Reasoning</label>
                             <Activity className="w-3 h-3 text-emerald-500 animate-pulse" />
                         </div>
 
@@ -191,7 +242,7 @@ const App = () => {
                             {executionLogs.length === 0 ? (
                                 <div className="py-12 text-center opacity-20">
                                     <Layers className="w-8 h-8 mx-auto mb-2" />
-                                    <p className="text-[10px] uppercase font-bold tracking-widest leading-none">Idle Pipeline</p>
+                                    <p className="text-[10px] uppercase font-bold tracking-widest leading-none">Cluster Idle</p>
                                 </div>
                             ) : (
                                 executionLogs.map((log, i) => (
@@ -236,7 +287,7 @@ const App = () => {
                         >
                             <div className="flex items-center gap-3 font-bold text-[11px] text-amber-200/80">
                                 <LifeBuoy className="w-4 h-4 text-amber-500" />
-                                RE-SYNC NODE
+                                FORCE SYNC
                             </div>
                             <ChevronRight className="w-3 h-3 text-amber-500/50 group-hover:translate-x-1 transition-transform" />
                         </button>
@@ -248,24 +299,21 @@ const App = () => {
                         onClick={() => setIsConsoleOpen(!isConsoleOpen)}
                         className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white/70 transition-colors"
                     >
-                        Execution Console
+                        Telemetry Stream
                         <div className={cn("px-1.5 py-0.5 rounded-sm bg-blue-500/20 text-blue-400 transition-transform", isConsoleOpen ? "rotate-90" : "")}>
                             <ChevronRight className="w-2.5 h-2.5" />
                         </div>
                     </button>
-                    <div className="flex items-center justify-between text-[9px] font-bold">
-                        <span className="text-white/15 uppercase tracking-widest font-black">Orchestrator V2.0</span>
-                    </div>
                 </div>
             </aside>
 
-            {/* Main Area */}
+            {/* Main Content Area */}
             <main className="flex-1 flex flex-col relative bg-[#050505]">
                 <header className="h-16 flex items-center justify-between px-8 border-b border-white/5 bg-[#050505]/95 backdrop-blur-3xl z-30">
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-3">
                             <Clock className="w-4 h-4 text-emerald-500 animate-pulse" />
-                            <h2 className="text-xs font-bold text-white/70 uppercase tracking-[0.2em]">Status: <span className="text-white">Active Optimized</span></h2>
+                            <h2 className="text-xs font-bold text-white/70 uppercase tracking-[0.2em]">Cluster: <span className="text-white">Active Optimized</span></h2>
                         </div>
                     </div>
 
@@ -315,7 +363,7 @@ const App = () => {
                                                             <CheckCircle2 className="w-6 h-6 text-emerald-400" />
                                                         </div>
                                                         <div>
-                                                            <p className="text-white/20 uppercase tracking-[0.2em] text-[9px] font-black mb-0.5">Internal Reference ID</p>
+                                                            <p className="text-white/20 uppercase tracking-[0.2em] text-[9px] font-black mb-0.5">Asset Registration ID</p>
                                                             <p className="text-emerald-400 font-mono text-[16px] font-black tracking-tight">{msg.ticket_id}</p>
                                                         </div>
                                                     </div>
@@ -342,7 +390,7 @@ const App = () => {
                     </div>
                 </div>
 
-                {/* Log Console Drawer */}
+                {/* Log Stream Drawer */}
                 <AnimatePresence>
                     {isConsoleOpen && (
                         <motion.div
@@ -354,7 +402,7 @@ const App = () => {
                             <div className="px-10 py-4 bg-white/[0.03] border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-4">
                                     <Activity className="w-4 h-4 text-blue-500" />
-                                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/60">Live Cluster Telemetry</span>
+                                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/60">Logic Pipeline Telemetry</span>
                                 </div>
                                 <div className="flex gap-6 items-center">
                                     <button onClick={() => setRawLogs([])} className="text-[10px] font-black text-white/20 hover:text-red-500 uppercase transition-all tracking-widest">Wipe Buffer</button>
@@ -365,7 +413,7 @@ const App = () => {
                                 {rawLogs.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center opacity-10">
                                         <Database className="w-12 h-12 mb-4" />
-                                        <p className="text-[10px] font-black uppercase tracking-[0.5em]">No Active Stream</p>
+                                        <p className="text-[10px] font-black uppercase tracking-[0.5em]">System Dormant</p>
                                     </div>
                                 ) : (
                                     rawLogs.map((log, i) => (
@@ -386,19 +434,20 @@ const App = () => {
                     )}
                 </AnimatePresence>
 
+                {/* Execution Input Bar */}
                 <div className="p-12 pt-0 pb-12 relative z-20 w-full">
                     <div className="max-w-4xl mx-auto px-1">
                         <form onSubmit={handleSubmit} className="relative group">
                             <div className="absolute -inset-1.5 bg-gradient-to-r from-purple-600/50 via-blue-600/50 to-emerald-600/50 rounded-[3rem] blur-xl opacity-20 group-focus-within:opacity-50 transition duration-1000"></div>
                             <div className="relative flex items-center gap-6 p-2 bg-[#0A0A0A] rounded-[3rem] border border-white/10 ring-1 ring-white/10 shadow-3xl glass transition-all overflow-hidden focus-within:ring-white/20">
                                 <div className="p-5 ml-2 text-white/20 transition-colors group-focus-within:text-blue-500">
-                                    <Cpu className="w-6 h-6" />
+                                    <Database className="w-6 h-6" />
                                 </div>
                                 <input
                                     type="text"
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
-                                    placeholder="Enter natural language command..."
+                                    placeholder="Execute natural language command..."
                                     className="flex-1 bg-transparent border-none focus:ring-0 text-[18px] text-white placeholder-white/10 py-5 font-medium"
                                 />
                                 <button
@@ -413,18 +462,18 @@ const App = () => {
                     </div>
                 </div>
 
-                {/* Advanced Configuration Modal */}
+                {/* Cluster Configuration Modal */}
                 <AnimatePresence>
                     {isSettingsOpen && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center p-8">
                             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsSettingsOpen(false)} className="absolute inset-0 bg-black/95 backdrop-blur-3xl" />
                             <motion.div initial={{ scale: 0.98, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.98, opacity: 0, y: 10 }} className="relative w-full max-w-2xl bg-[#0A0A0A] rounded-[3rem] border border-white/10 shadow-3xl flex flex-col max-h-[90vh] overflow-hidden glass">
-                                {/* Modal Header Tabs */}
+                                {/* Modal Navigation */}
                                 <div className="p-10 pb-4 flex items-center justify-between border-b border-white/5 bg-white/[0.01]">
                                     <div className="flex gap-6">
                                         {[
                                             { id: 'ai', label: 'Models', icon: <Cpu /> },
-                                            { id: 'kb', label: 'RAG Knowledge', icon: <Database /> }
+                                            { id: 'kb', label: 'Knowledge Base', icon: <Database /> }
                                         ].map(tab => (
                                             <button
                                                 key={tab.id}
@@ -461,16 +510,15 @@ const App = () => {
                                                             {React.cloneElement(p.icon, { className: "w-7 h-7" })}
                                                         </div>
                                                         <p className="font-black uppercase tracking-[0.2em] text-[13px]">{p.name}</p>
-                                                        {activeProvider === id && <div className="absolute top-4 right-4 w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,1)]" />}
                                                     </button>
                                                 ))}
                                             </div>
 
                                             <div className="space-y-6">
                                                 <div className="flex items-center justify-between px-2">
-                                                    <label className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] font-black">Connection Endpoint / Secret</label>
+                                                    <label className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em]">Identity Protocol / Secret Key</label>
                                                     {activeProvider === 'local' && (
-                                                        <button onClick={fetchOllamaModels} className="text-[10px] font-black text-emerald-500 hover:text-emerald-400 uppercase tracking-widest px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 transition-all">Verify Ollama Hub</button>
+                                                        <button onClick={() => fetchModels('local', apiKeys.local)} className="text-[10px] font-black text-emerald-500 uppercase tracking-widest px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 transition-all">Sync Ollama Hub</button>
                                                     )}
                                                 </div>
                                                 <div className="relative">
@@ -478,15 +526,19 @@ const App = () => {
                                                     <input
                                                         type={activeProvider === 'local' ? 'text' : 'password'}
                                                         value={apiKeys[activeProvider]}
-                                                        onChange={(e) => setApiKeys({ ...apiKeys, [activeProvider]: e.target.value })}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setApiKeys({ ...apiKeys, [activeProvider]: val });
+                                                            if (val.length > 5) fetchModels(activeProvider, val);
+                                                        }}
                                                         className="w-full bg-black/40 border border-white/10 rounded-2xl py-6 pl-16 pr-8 font-mono text-[13px] focus:border-blue-500/50 outline-none transition-all placeholder-white/5"
-                                                        placeholder={activeProvider === 'local' ? "http://localhost:11434" : "••••••••••••••••••••••••••••••••"}
+                                                        placeholder={activeProvider === 'local' ? "http://localhost:11434" : "sk-••••••••••••••••••••••••••••••••"}
                                                     />
                                                 </div>
                                             </div>
 
                                             <div className="space-y-6 pb-4">
-                                                <label className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] font-black px-2">Active Target Model</label>
+                                                <label className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] px-2">Active Cognitive Target</label>
                                                 <div className="relative">
                                                     <Cpu className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-500/50" />
                                                     <select
@@ -494,7 +546,7 @@ const App = () => {
                                                         onChange={(e) => setSelectedModel(e.target.value)}
                                                         className="w-full bg-black/40 border border-white/10 rounded-2xl py-6 pl-16 pr-8 font-black text-[13px] uppercase tracking-widest outline-none cursor-pointer appearance-none focus:border-blue-500/50"
                                                     >
-                                                        {providers[activeProvider].models.map(m => <option key={m} className="bg-[#050505]">{m}</option>)}
+                                                        {availableModels.length === 0 ? <option>Sync Identity to Load Models...</option> : availableModels.map(m => <option key={m} className="bg-[#050505]">{m}</option>)}
                                                     </select>
                                                 </div>
                                             </div>
@@ -502,31 +554,32 @@ const App = () => {
                                     ) : (
                                         <div className="space-y-12">
                                             <div className="grid grid-cols-2 gap-8 px-2">
-                                                <div className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-dashed border-white/10 flex flex-col items-center justify-center gap-6 hover:bg-white/[0.04] hover:border-blue-500/40 transition-all cursor-pointer group/upload">
+                                                <label className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-dashed border-white/10 flex flex-col items-center justify-center gap-6 hover:bg-white/[0.04] hover:border-blue-500/40 transition-all cursor-pointer group/upload">
+                                                    <input type="file" className="hidden" onChange={(e) => handleFileUpload(e, 'IT')} />
                                                     <div className="w-20 h-20 rounded-[2rem] bg-white/5 flex items-center justify-center group-hover/upload:bg-blue-600/10 group-hover/upload:scale-110 transition-all">
-                                                        <Upload className="w-8 h-8 text-white/20 group-hover/upload:text-blue-500" />
+                                                        {uploading ? <Activity className="w-8 h-8 text-blue-500 animate-spin" /> : <Upload className="w-8 h-8 text-white/20 group-hover/upload:text-blue-500" />}
                                                     </div>
                                                     <div className="text-center">
-                                                        <p className="font-black text-[14px] uppercase tracking-widest">Inject Documents</p>
-                                                        <p className="text-[10px] text-white/10 font-bold mt-2 uppercase tracking-tighter">PDF • DOCX • MARKDOWN</p>
+                                                        <p className="font-black text-[14px] uppercase tracking-widest">Index IT Data</p>
+                                                        <p className="text-[10px] text-white/10 font-bold mt-2 uppercase tracking-tighter">PDF • TXT • MD</p>
                                                     </div>
-                                                </div>
-                                                <div className="p-12 rounded-[3.5rem] bg-[#0A0A0A] border border-white/5 flex flex-col items-center justify-center gap-6 opacity-30 grayscale cursor-not-allowed">
-                                                    <Globe className="w-10 h-10 text-white/20" />
+                                                </label>
+                                                <label className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-dashed border-white/10 flex flex-col items-center justify-center gap-6 hover:bg-white/[0.04] hover:border-emerald-500/40 transition-all cursor-pointer group/upload">
+                                                    <input type="file" className="hidden" onChange={(e) => handleFileUpload(e, 'HR')} />
+                                                    <div className="w-20 h-20 rounded-[2rem] bg-white/5 flex items-center justify-center group-hover/upload:bg-emerald-600/10 group-hover/upload:scale-110 transition-all">
+                                                        {uploading ? <Activity className="w-8 h-8 text-emerald-500 animate-spin" /> : <Database className="w-8 h-8 text-white/20 group-hover/upload:text-emerald-500" />}
+                                                    </div>
                                                     <div className="text-center">
-                                                        <p className="font-black text-[14px] uppercase tracking-widest">Global Connect</p>
-                                                        <p className="text-[10px] text-white/10 font-bold mt-2 uppercase">SharePoint / Cloud Hub</p>
+                                                        <p className="font-black text-[14px] uppercase tracking-widest">Index HR Data</p>
+                                                        <p className="text-[10px] text-white/10 font-bold mt-2 uppercase">PDF • DOCX • MD</p>
                                                     </div>
-                                                </div>
+                                                </label>
                                             </div>
 
                                             <div className="space-y-6">
-                                                <label className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] font-black px-2">Managed Knowledge Objects</label>
+                                                <label className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] px-2">Cognitive Knowledge Map</label>
                                                 <div className="space-y-4">
-                                                    {[
-                                                        { name: 'it_policy_2024.pdf', size: '2.4 MB', type: 'IT', time: '2h ago' },
-                                                        { name: 'hr_manual_v3.docx', size: '1.8 MB', type: 'HR', time: '1d ago' }
-                                                    ].map((file, i) => (
+                                                    {kbFiles.map((file, i) => (
                                                         <div key={i} className="flex items-center justify-between p-6 bg-white/[0.01] rounded-[2rem] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all group">
                                                             <div className="flex items-center gap-6">
                                                                 <div className="w-14 h-14 rounded-2xl bg-[#0A0A0A] border border-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -540,7 +593,6 @@ const App = () => {
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            <button className="px-5 py-2 rounded-xl bg-red-500/5 border border-red-500/10 text-red-500 uppercase text-[9px] font-black tracking-[0.2em] opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all">De-Index</button>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -550,7 +602,7 @@ const App = () => {
                                 </div>
 
                                 <div className="p-10 bg-black/80 border-t border-white/10 flex gap-6">
-                                    <button onClick={() => setIsSettingsOpen(false)} className="flex-1 py-6 bg-white text-black font-black uppercase tracking-[0.3em] rounded-[1.5rem] shadow-3xl hover:brightness-90 active:scale-[0.98] transition-all text-xs">Sync & Deploy Cluster</button>
+                                    <button onClick={() => setIsSettingsOpen(false)} className="flex-1 py-6 bg-white text-black font-black uppercase tracking-[0.3em] rounded-[1.5rem] shadow-3xl hover:brightness-90 active:scale-[0.98] transition-all text-xs">Commit & Synchronize</button>
                                 </div>
                             </motion.div>
                         </div>

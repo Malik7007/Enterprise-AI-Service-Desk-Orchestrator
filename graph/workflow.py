@@ -161,5 +161,17 @@ def build_workflow():
         interrupt_before=["escalation"]
     )
 
+def reindex_domain(domain: str):
+    """
+    Manually triggers a re-indexing of a domain's vector store.
+    """
+    if domain.upper() == "IT":
+        it_agent.vector_store.initialize_store()
+    elif domain.upper() == "HR":
+        hr_agent.vector_store.initialize_store()
+    elif domain.upper() == "FINANCE":
+        finance_agent.vector_store.initialize_store()
+    print(f"[SYSTEM] Re-indexed {domain} domain.")
+
 # Singleton app instance
 app = build_workflow()

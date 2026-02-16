@@ -16,28 +16,37 @@ class VectorStoreManager:
         self.data_path = data_path
         self.embeddings = get_embeddings()
         self.vector_store = None
-        self._initialize_store()
+        self.initialize_store()
 
-    def _initialize_store(self):
+    def initialize_store(self):
         """
         Uses SemanticChunker for higher quality document representation.
         """
-        if not os.path.exists(self.data_path) or not os.listdir(self.data_path):
-            self.vector_store = FAISS.from_texts(["Placeholder"], self.embeddings)
+        os.makedirs(self.data_path, exist_ok=True)
+        
+        if not os.listdir(self.data_path):
+            self.vector_store = FAISS.from_texts([f"This is a placeholder for the {self.domain} knowledge base."], self.embeddings)
             return
 
-        loader = DirectoryLoader(self.data_path, glob="**/*.md", loader_cls=TextLoader)
-        docs = loader.load()
-        
-        # Semantic Chunking is more expensive but significantly more accurate for RAG
-        # It splits based on sentence embedding similarity
-        text_splitter = SemanticChunker(self.embeddings, breakpoint_threshold_type="percentile")
-        split_docs = text_splitter.split_documents(docs)
-        
-        self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+        loader = DirectoryLoader(self.data_path, glob="**/*", loader_cls=TextLoader)
+        try:
+            docs = loader.load()
+            if not docs:
+                self.vector_store = FAISS.from_texts([f"Empty {self.domain} knowledge base."], self.embeddings)
+                return
+                
+            text_splitter = SemanticChunker(self.embeddings, breakpoint_threshold_type="percentile")
+            split_docs = text_splitter.split_documents(docs)
+            self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+            print(f"[RAG] Indexed {len(split_docs)} chunks for {self.domain} domain.")
+        except Exception as e:
+            print(f"[RAG] Error initializing {self.domain} store: {e}")
+            self.vector_store = FAISS.from_texts([f"Error in {self.domain} knowledge base."], self.embeddings)
 
     def search(self, query: str, k: int = 4):
         """
-        Performs similarity search. k is increased for better coverage.
+        Performs similarity search.
         """
+        if not self.vector_store:
+            return []
         return self.vector_store.similarity_search(query, k=k)
